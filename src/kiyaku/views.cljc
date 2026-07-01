@@ -22,6 +22,6 @@
 
 (defn root [db]
   [:div {:class (class-name :kiyaku)}
-   [:h1 "Customer accounts & returns"]
+   [:h1 "Customer accounts and returns"]
    (into [:section] (map account-card (vals (:accounts db {}))))
    (into [:section] (map return-row (:returns db [])))])
