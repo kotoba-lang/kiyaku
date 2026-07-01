@@ -29,3 +29,33 @@
   (ledger/activity
    (merge {:lane :customer :kind :account
            :title (:email acc) :props {:account-id (:id acc)}} opts)))
+
+;; ---------------------------------------------------------------------------
+;; wallet transactions (credit/debit ledger on the account)
+;; ---------------------------------------------------------------------------
+
+(defrecord WalletTx [id type amount reason at])
+
+(defn wallet-tx [m] (merge {:type :credit} m))
+
+(defn wallet-balance
+  "Compute balance from a seq of WalletTx (credits add, debits subtract)."
+  [txs]
+  (reduce (fn [bal {:keys [type amount]}]
+            (if (= type :debit) (- bal (or amount 0)) (+ bal (or amount 0))))
+          0 txs))
+
+(defn apply-wallet-tx
+  "Record a wallet transaction on an account: adjust :wallet-balance and append
+  to :wallet-ledger. Returns the updated account."
+  [acc tx]
+  (let [tx (map->WalletTx tx)
+        delta (if (= (:type tx) :debit) (- (:amount tx 0)) (:amount tx 0))]
+    (-> acc
+        (update :wallet-balance (fnil + 0) delta)
+        (update :wallet-ledger (fnil conj []) tx))))
+
+(defn wallet-ledger [acc] (:wallet-ledger acc []))
+
+(defn wallet-txs-by-type [acc type]
+  (filterv #(= (:type %) type) (wallet-ledger acc)))
