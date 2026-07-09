@@ -19,7 +19,13 @@
   (is (not (a/valid-postal? "abc" "DE")))
   ;; unknown country → just non-blank
   (is (a/valid-postal? "anything" "XX"))
-  (is (not (a/valid-postal? "" "XX"))))
+  (is (not (a/valid-postal? "" "XX")))
+  ;; garbage padded around a valid-shaped substring must NOT pass -- the whole
+  ;; postal code has to match the country's format, not just an embedded part
+  (is (not (a/valid-postal? "1000-0001" "JP")))
+  (is (not (a/valid-postal? "941056" "US")))
+  (is (not (a/valid-postal? "XXSW1A1AAXX" "GB")))
+  (is (not (a/valid-postal? "ZZK1A0B1ZZ" "CA"))))
 
 (deftest validate-address-test
   (let [good {:line1 "1-2-3" :city "Tokyo" :postal "100-0001" :country "JP"}]

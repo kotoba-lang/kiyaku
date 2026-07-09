@@ -94,7 +94,7 @@
   [postal country]
   (let [pat (postal-format-for country)]
     (if pat
-      (boolean (and postal (re-find pat (str postal))))
+      (boolean (and postal (re-matches pat (str postal))))
       (and postal (not (str/blank? (str postal)))))))
 
 (defn validate-address
