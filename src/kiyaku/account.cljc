@@ -3,7 +3,7 @@
   :payment-method-refs :wallet-balance :created-at}. Address{:id :label :line1
   :city :postal :country :default?}. The end-customer counterpart to
   chobo.tenant (which is the operator). Projects to chobo.ledger lane :customer."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [chobo.ledger :as ledger]))
 
 (defrecord Account [id email name addresses payment-method-refs wallet-balance created-at])
@@ -73,13 +73,13 @@
   "True if the country code is a known ISO 3166-1 alpha-2 code (uppercase)."
   [country]
   (let [c (if (keyword? country) (name country) (str country))]
-    (contains? country-codes (str/upper-case c))))
+    (contains? country-codes (str/upper c))))
 
 (defn postal-format-for
   "Return a regex matching the postal format for a country, or nil if unknown."
   [country]
   (let [c (if (keyword? country) (name country) (str country))]
-    (case (str/upper-case c)
+    (case (str/upper c)
       "JP" #"\d{3}-\d{4}"
       "US" #"\d{5}(-\d{4})?"
       "GB" #"[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}"

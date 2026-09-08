@@ -1,7 +1,7 @@
 (ns kiyaku.return-analytics
   "Return reason categorization + analytics (pure). Aggregates return requests
   by reason, computes return rate (returns / orders), and identifies top reasons."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def reason-categories
   "Map of specific reason → category for rollup."
