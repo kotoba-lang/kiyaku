@@ -1,11 +1,13 @@
 #!/usr/bin/env nbb
-;; `kotoba/postal_core.kotoba`'s program table, run through `pattern-vm`,
-;; against the `kiyaku.account` that ships.
+;; `kotoba/postal_core.kotoba`'s `valid-postal?`, against the `kiyaku.account`
+;; that ships.
 ;;
-;; Two artifacts, because a module that declares `:schemas` cannot be REQUIRED
-;; by another one (measured 2026-09-09, minimised to four files): the table
-;; module and the matcher are compiled separately and put together here, which
-;; is the host's job anyway.
+;; ONE artifact. Until kotoba-lang/amu#912 (2026-09-09) a module that declared
+;; `:schemas` could not be required, `pattern-vm` is records throughout, and
+;; this file compiled the table and the matcher separately and put them
+;; together itself -- so the question the `.cljc` actually asks, `valid-postal?`,
+;; existed in neither artifact and was assembled here. It is now one Kotoba
+;; function, and this file only asks it.
 ;;
 ;; The oracle is the namespace itself -- `valid-postal?` with its six regex
 ;; literals -- so this compares the compiled patterns with the regexes they
@@ -34,17 +36,20 @@
                                  "github" "com-junkawasaki" "orgs" "kotoba-lang" "pattern")]))
       (path/resolve repo-root ".." "pattern")))
 
-(def fuel 20000000)
+(def fuel 200000000)
 
 ;; Valid and invalid at the edges of each format, plus the two that differ only
-;; by an optional space and the two that are the same format.
+;; by an optional space and the two that are the same format. The last entry is
+;; a country the table has no format for, which exercises the fallback rather
+;; than the matcher.
 (def corpus
   [["JP" ["123-4567" "1234567" "123-456" "123-45678" "abc-defg" ""]]
    ["US" ["12345" "12345-6789" "1234" "123456" "12345-678" ""]]
    ["GB" ["SW1A 2AA" "SW1A2AA" "M11AA" "M1 1AA" "sw1a 2aa" "SW1A  2AA" ""]]
    ["CA" ["K1A0B1" "K1A 0B1" "K1A  0B1" "k1a0b1" "K1A0B" ""]]
    ["DE" ["10115" "1011" "101155" "1011a" ""]]
-   ["FR" ["75008" "7500" "750088" ""]]])
+   ["FR" ["75008" "7500" "750088" ""]]
+   ["ZZ" ["anything" "" " " "   " "\t" "\n" " x "]]])
 
 (def failures (atom 0))
 (def checks (atom 0))
@@ -60,39 +65,57 @@
     (println "REFUSED: kotoba-lang/pattern is not checked out at" pattern-repo)
     (js/process.exit 2))
   (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "postal-parity-"))
-        table (path/join dir "postal_core.mjs")
-        vm (path/join dir "pattern_vm.mjs")
-        c1 (sh "kotoba" ["-M" "compile" (path/join repo-root "kotoba" "postal_core.kotoba")
-                         "--target" "js" "--fuel" (str fuel) "--output" table])
-        c2 (sh "kotoba" ["-M" "compile" (path/join pattern-repo "kotoba" "pattern_vm.kotoba")
-                         "--target" "js" "--fuel" (str fuel) "--output" vm])]
-    (when-not (and (zero? (:exit c1)) (zero? (:exit c2)))
-      (println "compile failed:" (:out c1) (:out c2)) (js/process.exit 1))
-    (-> (js/Promise.all #js [(js/import table) (js/import vm)])
+        out (path/join dir "postal_core.mjs")
+        c (sh "kotoba" ["-M" "compile" (path/join repo-root "kotoba" "postal_core.kotoba")
+                        "--target" "js"
+                        "--source-path" (path/join repo-root "kotoba")
+                        "--source-path" (path/join pattern-repo "kotoba")
+                        "--unpinned"
+                        "--fuel" (str fuel) "--output" out])]
+    (when-not (zero? (:exit c))
+      ;; "Could not measure" and "measured a disagreement" must not leave by
+      ;; the same door. A `kotoba` older than kotoba-lang/amu#912 refuses the
+      ;; require itself -- that is a stale toolchain, not a wrong answer, and
+      ;; it exits 2 with the reason named.
+      (let [text (str (:out c) (:err c))]
+        (if (or (.includes text "alias-only :require clauses are admitted")
+                (.includes text "namespace-require-needs-project"))
+          (do (println "REFUSED: this `kotoba` predates kotoba-lang/amu#912 and cannot")
+              (println "         require a module that declares :schemas. Sync the amu")
+              (println "         checkout to the west pin and retry.")
+              (js/process.exit 2))
+          (do (println "compile failed (exit" (:exit c) "):" text)
+              (js/process.exit 1)))))
+    (-> (js/import out)
         (.then
-         (fn [mods]
-           (let [tbl (aget mods 0)
-                 machine (aget mods 1)]
+         (fn [module]
+           (let [k (.instantiateKotoba module)]
              (doseq [[country postals] corpus]
-               (let [prog ((aget (.instantiateKotoba tbl) "program-for") country)]
-                 (doseq [p postals]
-                   (swap! checks inc)
-                   (let [kotoba (try ((aget (.instantiateKotoba machine) "match?") prog p)
-                                     (catch :default e (str "TRAP " (.-message e))))
-                         cljc (oracle/valid-postal? p country)]
-                     (when-not (= kotoba cljc)
-                       (swap! failures inc)
-                       (println "  DISAGREE" country (pr-str p))
-                       (println "    cljc  :" (pr-str cljc))
-                       (println "    kotoba:" (pr-str kotoba)))))))
-             ;; The intended difference, asserted rather than left to be found:
-             ;; an unknown country has no program here, and the .cljc falls back
-             ;; to "any non-blank postal".
+               (doseq [p postals]
+                 (swap! checks inc)
+                 (let [kotoba (try ((aget k "valid-postal?") p country)
+                                   (catch :default e (str "TRAP " (.-message e))))
+                       cljc (oracle/valid-postal? p country)]
+                   (when-not (= kotoba cljc)
+                     (swap! failures inc)
+                     (println "  DISAGREE" country (pr-str p))
+                     (println "    cljc  :" (pr-str cljc))
+                     (println "    kotoba:" (pr-str kotoba))))))
+             ;; The one known difference, asserted rather than left to be
+             ;; found. `blank?` in the module is ASCII whitespace; `str/blank?`
+             ;; in the `.cljc` is Character/isWhitespace, which also takes
+             ;; U+3000 and the rest of Unicode Zs. This probe FAILS on the day
+             ;; the module widens -- that is the removal condition, and it does
+             ;; not depend on anyone remembering.
              (swap! checks inc)
-             (let [prog ((aget (.instantiateKotoba tbl) "program-for") "ZZ")]
-               (when-not (and (= "" prog) (true? (oracle/valid-postal? "anything" "ZZ")))
+             (let [ideographic-space "　"
+                   kotoba ((aget k "valid-postal?") ideographic-space "ZZ")
+                   cljc (oracle/valid-postal? ideographic-space "ZZ")]
+               (when-not (and (true? kotoba) (false? cljc))
                  (swap! failures inc)
-                 (println "  DISAGREE on the unknown-country fallback")))
+                 (println "  the ASCII-only `blank?` gap has moved:")
+                 (println "    expected kotoba=true cljc=false")
+                 (println "    got      kotoba=" (pr-str kotoba) "cljc=" (pr-str cljc))))
              (println (str "SCANNED\t" @checks))
              (println (if (zero? @failures)
                         (str "postal parity: " @checks "/" @checks

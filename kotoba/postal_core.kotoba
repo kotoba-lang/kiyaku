@@ -19,26 +19,33 @@
   ;;   node -e 'import("./emit.mjs").then(m => console.log(
   ;;     m.instantiateKotoba()["compile-text"]("\\d{3}-\\d{4}")))'
   ;;
-  ;; ## What is NOT here
+  ;; ## Requiring the matcher
   ;;
-  ;; The unknown-country fallback ("any non-blank postal") stays with the
-  ;; caller: it is not a pattern question, and putting it here would make this
-  ;; module answer for countries it has no format for.
-  ;; ⚠ This module does NOT require `pattern-vm`, and that is a limitation
-  ;; upstream rather than a choice. Measured 2026-09-09, minimised to four
-  ;; files: a module that declares `:schemas` CANNOT BE REQUIRED by another
-  ;; module -- the link is refused with "only one :export, one :capabilities
-  ;; and alias-only :require clauses are admitted", while a schema-free module
-  ;; links fine. `pattern-vm` is records throughout, so it cannot be a
-  ;; dependency of anything today; every Kotoba library that uses a record is
-  ;; in the same position.
+  ;; This module required nothing when it was written, and the reason was a
+  ;; compiler limitation rather than a choice: a module that declared
+  ;; `:schemas` could not be required at all, and `pattern-vm` is records
+  ;; throughout. The module owned only WHICH PROGRAM a country uses, the host
+  ;; ran the matcher, and `valid-postal?` -- the question the `.cljc` actually
+  ;; asks -- existed in neither artifact.
   ;;
-  ;; So this module owns what it can own -- WHICH PROGRAM a country uses --
-  ;; and the host runs `pattern-vm` on it. `test/kotoba/postal_parity.cljs`
-  ;; puts the two artifacts together and checks the answers against the
-  ;; `.cljc` that ships.
-  (:export [main program-for known-country? program-count
-            test-table test-fold test-unknown test-lengths]))
+  ;; kotoba-lang/amu#912 removed that limitation on 2026-09-09, so the
+  ;; `(:require [pattern-vm :as vm])` below is the first one of its kind and
+  ;; this module now answers the whole question. Compiling it needs
+  ;; `kotoba-lang/pattern`'s `kotoba/` on the source path:
+  ;;
+  ;;   kotoba -M compile kotoba/postal_core.kotoba --target js \
+  ;;     --source-path <pattern>/kotoba --fuel 200000000 --output postal.mjs
+  ;;
+  ;; ⚠ `blank?` below recognises ASCII whitespace. `str/blank?` in the
+  ;; `.cljc` is `Character/isWhitespace`, which is wider (U+3000 and the rest
+  ;; of Unicode Zs). The two agree on every input the parity corpus has, and
+  ;; `test/kotoba/postal_parity.cljs` probes the gap so it fails loudly if a
+  ;; caller ever depends on the wider one.
+  (:require [pattern-vm :as vm])
+  (:export [main program-for known-country? program-count valid-postal? blank?
+            cp-width
+            test-table test-fold test-unknown test-lengths test-valid
+            test-unknown-fallback]))
 
 ;; --- the programs ---------------------------------------------------------
 ;;
@@ -111,6 +118,62 @@
        ;; a program is 14 chars of header plus whole instructions and ranges
        (= 0 (- (string-length (app (ref program-for) "DE"))
                (+ 14 (+ (* 6 14) (* 5 12)))))))
+
+(defn cp-width [cp :i64] :i64
+  ;; `string-code-point-at` indexes BYTES, so a walk that advances by 1 lands
+  ;; mid-character on anything non-ASCII and traps with
+  ;; `string-code-point-boundary`. Measured: widening `blank?` by one code
+  ;; point was enough to reach it. `pattern-vm` has the same function and does
+  ;; not export it.
+  (if (< cp 128) 1 (if (< cp 2048) 2 (if (< cp 65536) 3 4))))
+
+(defn blank-from [s :string i :i64 n :i64] :bool
+  ;; ASCII whitespace only -- see the note at the top. Written as a walk
+  ;; rather than a trim because Kotoba has no trim head and this is the
+  ;; question being asked: is EVERY code point whitespace.
+  (if (>= i n)
+    true
+    (let [cp (string-code-point-at s i)]
+      (if (or (= cp 32) (or (= cp 9) (or (= cp 10) (or (= cp 13) (= cp 12)))))
+        (app (ref blank-from) s (+ i (app (ref cp-width) cp)) n)
+        false))))
+
+(defn blank? [s :string] :bool
+  (app (ref blank-from) s 0 (string-length s)))
+
+(defn valid-postal? [postal :string country :string] :bool
+  ;; The `.cljc`'s argument order, so the two can be compared without a
+  ;; wrapper deciding which is which. Unknown country falls back to "any
+  ;; non-blank postal", exactly as it does there -- that fallback used to live
+  ;; with the caller only because this module could not run the matcher.
+  (let [prog (app (ref program-for) country)]
+    (if (= 0 (string-length prog))
+      (not (app (ref blank?) postal))
+      (vm/match? prog postal))))
+
+(defn test-valid [] :bool
+  ;; one accept and one reject per country, at the edge of each format
+  (and (app (ref valid-postal?) "100-0001" "JP")
+       (and (not (app (ref valid-postal?) "1000001" "JP"))
+            (and (app (ref valid-postal?) "12345" "US")
+                 (and (app (ref valid-postal?) "12345-6789" "US")
+                      (and (not (app (ref valid-postal?) "1234" "US"))
+                           (and (app (ref valid-postal?) "SW1A 1AA" "GB")
+                                (and (app (ref valid-postal?) "K1A 0B1" "CA")
+                                     (and (app (ref valid-postal?) "10115" "DE")
+                                          (not (app (ref valid-postal?) "1011" "FR")))))))))))
+
+(defn test-unknown-fallback [] :bool
+  ;; an unknown country accepts anything non-blank and refuses blanks
+  (and (app (ref valid-postal?) "whatever" "ZZ")
+       (and (not (app (ref valid-postal?) "" "ZZ"))
+            (and (not (app (ref valid-postal?) "   " "ZZ"))
+                 (and (app (ref blank?) "\t\n")
+                      (and (not (app (ref blank?) " x "))
+                           ;; a non-ASCII postal must ANSWER rather than trap:
+                           ;; the walk advances by the code point's width
+                           (and (app (ref valid-postal?) "　" "ZZ")
+                                (= 3 (app (ref cp-width) 12288)))))))))
 
 (defn program-count [] :i64
   6)
