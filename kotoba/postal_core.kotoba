@@ -43,6 +43,7 @@
   ;; caller ever depends on the wider one.
   (:require [pattern-vm :as vm])
   (:export [main program-for known-country? program-count valid-postal? blank?
+            cp-width
             test-table test-fold test-unknown test-lengths test-valid
             test-unknown-fallback]))
 
@@ -118,6 +119,14 @@
        (= 0 (- (string-length (app (ref program-for) "DE"))
                (+ 14 (+ (* 6 14) (* 5 12)))))))
 
+(defn cp-width [cp :i64] :i64
+  ;; `string-code-point-at` indexes BYTES, so a walk that advances by 1 lands
+  ;; mid-character on anything non-ASCII and traps with
+  ;; `string-code-point-boundary`. Measured: widening `blank?` by one code
+  ;; point was enough to reach it. `pattern-vm` has the same function and does
+  ;; not export it.
+  (if (< cp 128) 1 (if (< cp 2048) 2 (if (< cp 65536) 3 4))))
+
 (defn blank-from [s :string i :i64 n :i64] :bool
   ;; ASCII whitespace only -- see the note at the top. Written as a walk
   ;; rather than a trim because Kotoba has no trim head and this is the
@@ -126,7 +135,7 @@
     true
     (let [cp (string-code-point-at s i)]
       (if (or (= cp 32) (or (= cp 9) (or (= cp 10) (or (= cp 13) (= cp 12)))))
-        (app (ref blank-from) s (+ i 1) n)
+        (app (ref blank-from) s (+ i (app (ref cp-width) cp)) n)
         false))))
 
 (defn blank? [s :string] :bool
@@ -152,7 +161,7 @@
                            (and (app (ref valid-postal?) "SW1A 1AA" "GB")
                                 (and (app (ref valid-postal?) "K1A 0B1" "CA")
                                      (and (app (ref valid-postal?) "10115" "DE")
-                                          (not (app (ref valid-postal?) "1011" "FR"))))))))))
+                                          (not (app (ref valid-postal?) "1011" "FR")))))))))))
 
 (defn test-unknown-fallback [] :bool
   ;; an unknown country accepts anything non-blank and refuses blanks
@@ -160,7 +169,11 @@
        (and (not (app (ref valid-postal?) "" "ZZ"))
             (and (not (app (ref valid-postal?) "   " "ZZ"))
                  (and (app (ref blank?) "\t\n")
-                      (not (app (ref blank?) " x ")))))))
+                      (and (not (app (ref blank?) " x "))
+                           ;; a non-ASCII postal must ANSWER rather than trap:
+                           ;; the walk advances by the code point's width
+                           (and (app (ref valid-postal?) "　" "ZZ")
+                                (= 3 (app (ref cp-width) 12288)))))))))
 
 (defn program-count [] :i64
   6)
