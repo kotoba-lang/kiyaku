@@ -1,0 +1,8 @@
+(ns postal-core
+  ;; WIP stub, committed before it works: an untracked file in a worktree
+  ;; looks clean to a retirement sweep, and one was removed under this session
+  ;; earlier today with 560 lines in it.
+  (:export [main])
+  (:require [pattern-vm :as vm]))
+
+(defn main [] 0)
