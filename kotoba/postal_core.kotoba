@@ -24,9 +24,21 @@
   ;; The unknown-country fallback ("any non-blank postal") stays with the
   ;; caller: it is not a pattern question, and putting it here would make this
   ;; module answer for countries it has no format for.
-  (:require [pattern-vm :as vm])
-  (:export [main program-for known-country? valid-postal? valid-postal-text
-            test-jp test-us test-gb test-ca test-de test-unknown test-text]))
+  ;; ⚠ This module does NOT require `pattern-vm`, and that is a limitation
+  ;; upstream rather than a choice. Measured 2026-09-09, minimised to four
+  ;; files: a module that declares `:schemas` CANNOT BE REQUIRED by another
+  ;; module -- the link is refused with "only one :export, one :capabilities
+  ;; and alias-only :require clauses are admitted", while a schema-free module
+  ;; links fine. `pattern-vm` is records throughout, so it cannot be a
+  ;; dependency of anything today; every Kotoba library that uses a record is
+  ;; in the same position.
+  ;;
+  ;; So this module owns what it can own -- WHICH PROGRAM a country uses --
+  ;; and the host runs `pattern-vm` on it. `test/kotoba/postal_parity.cljs`
+  ;; puts the two artifacts together and checks the answers against the
+  ;; `.cljc` that ships.
+  (:export [main program-for known-country? program-count
+            test-table test-fold test-unknown test-lengths]))
 
 ;; --- the programs ---------------------------------------------------------
 ;;
@@ -71,60 +83,37 @@
 (defn known-country? [country :string] :bool
   (> (string-length (app (ref program-for) country)) 0))
 
-;; Answers the FORMAT question only. A country with no format here is not
-;; "invalid" -- it is not this module's question, and the caller keeps its
-;; non-blank fallback.
-(defn valid-postal? [postal :string country :string] :bool
-  (let [p (app (ref program-for) country)]
-    (if (= 0 (string-length p))
-      false
-      (app (ref vm/match?) p postal))))
+(defn test-table [] :bool
+  ;; every country the .cljc knows a format for has a program here, and each
+  ;; program is a well-formed header
+  (and (string=? "K0" (string-substring (app (ref program-for) "JP") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "US") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "GB") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "CA") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "DE") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "FR") 0 2))))
 
-(defn valid-postal-text [postal :string country :string] :string
-  (if (app (ref valid-postal?) postal country) "true" "false"))
-
-;; --- tests ----------------------------------------------------------------
-
-(defn test-jp [] :bool
-  (and (app (ref valid-postal?) "123-4567" "JP")
-       (app (ref valid-postal?) "123-4567" "jp")
-       (not (app (ref valid-postal?) "1234567" "JP"))
-       (not (app (ref valid-postal?) "123-456" "JP"))
-       (not (app (ref valid-postal?) "123-45678" "JP"))))
-
-(defn test-us [] :bool
-  (and (app (ref valid-postal?) "12345" "US")
-       (app (ref valid-postal?) "12345-6789" "US")
-       (not (app (ref valid-postal?) "1234" "US"))
-       (not (app (ref valid-postal?) "12345-678" "US"))))
-
-(defn test-gb [] :bool
-  (and (app (ref valid-postal?) "SW1A 2AA" "GB")
-       (app (ref valid-postal?) "SW1A2AA" "GB")
-       (not (app (ref valid-postal?) "sw1a 2aa" "GB"))
-       (not (app (ref valid-postal?) "12345" "GB"))))
-
-(defn test-ca [] :bool
-  (and (app (ref valid-postal?) "K1A0B1" "CA")
-       (app (ref valid-postal?) "K1A 0B1" "CA")
-       (not (app (ref valid-postal?) "K1A  0B1" "CA"))
-       (not (app (ref valid-postal?) "k1a0b1" "CA"))))
-
-(defn test-de [] :bool
-  (and (app (ref valid-postal?) "10115" "DE")
-       (app (ref valid-postal?) "75008" "FR")
-       (not (app (ref valid-postal?) "1011" "DE"))
-       (not (app (ref valid-postal?) "101155" "DE"))))
+(defn test-fold [] :bool
+  ;; the .cljc upper-cases the country; both cases have to reach the same table
+  (and (string=? (app (ref program-for) "jp") (app (ref program-for) "JP"))
+       (string=? (app (ref program-for) "Us") (app (ref program-for) "US"))))
 
 (defn test-unknown [] :bool
-  ;; a country with no format answers false HERE and the caller falls back
   (and (not (app (ref known-country?) "ZZ"))
-       (not (app (ref valid-postal?) "12345" "ZZ"))
+       (= 0 (string-length (app (ref program-for) "ZZ")))
        (app (ref known-country?) "JP")))
 
-(defn test-text [] :bool
-  (and (string=? "true" (app (ref valid-postal-text) "123-4567" "JP"))
-       (string=? "false" (app (ref valid-postal-text) "1234567" "JP"))))
+(defn test-lengths [] :bool
+  ;; DE and FR are the same format, and GB is the longest of the six
+  (and (string=? (app (ref program-for) "DE") (app (ref program-for) "FR"))
+       (> (string-length (app (ref program-for) "GB"))
+          (string-length (app (ref program-for) "DE")))
+       ;; a program is 14 chars of header plus whole instructions and ranges
+       (= 0 (- (string-length (app (ref program-for) "DE"))
+               (+ 14 (+ (* 6 14) (* 5 12)))))))
+
+(defn program-count [] :i64
+  6)
 
 (defn main []
   (string-length (app (ref program-for) "JP")))
