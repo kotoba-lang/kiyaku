@@ -1,0 +1,119 @@
+(ns postal-core
+  ;; `kiyaku.account`'s postal-format check, in Kotoba -- and the first thing
+  ;; in this workspace to USE `kotoba-lang/pattern` rather than hand-roll a
+  ;; scanner.
+  ;;
+  ;; The `.cljc` spells six country formats as six regex literals and asks
+  ;; `re-matches`. Kotoba has no regex head, which is why twelve modules in
+  ;; this workspace hand-roll scanners out of `string-code-point-at`. Here the
+  ;; pattern is DATA: each program below was compiled from the same regex by
+  ;; `pattern-emit`, and `pattern-vm` runs it.
+  ;;
+  ;; ## Regenerating a program
+  ;;
+  ;; The literals are build output and must not be hand-edited. To regenerate,
+  ;; compile the emitter and ask it:
+  ;;
+  ;;   kotoba -M compile <pattern>/kotoba/pattern_emit.kotoba --target js \
+  ;;     --fuel 200000000 --output emit.mjs
+  ;;   node -e 'import("./emit.mjs").then(m => console.log(
+  ;;     m.instantiateKotoba()["compile-text"]("\\d{3}-\\d{4}")))'
+  ;;
+  ;; ## What is NOT here
+  ;;
+  ;; The unknown-country fallback ("any non-blank postal") stays with the
+  ;; caller: it is not a pattern question, and putting it here would make this
+  ;; module answer for countries it has no format for.
+  ;; ⚠ This module does NOT require `pattern-vm`, and that is a limitation
+  ;; upstream rather than a choice. Measured 2026-09-09, minimised to four
+  ;; files: a module that declares `:schemas` CANNOT BE REQUIRED by another
+  ;; module -- the link is refused with "only one :export, one :capabilities
+  ;; and alias-only :require clauses are admitted", while a schema-free module
+  ;; links fine. `pattern-vm` is records throughout, so it cannot be a
+  ;; dependency of anything today; every Kotoba library that uses a record is
+  ;; in the same position.
+  ;;
+  ;; So this module owns what it can own -- WHICH PROGRAM a country uses --
+  ;; and the host runs `pattern-vm` on it. `test/kotoba/postal_parity.cljs`
+  ;; puts the two artifacts together and checks the answers against the
+  ;; `.cljc` that ships.
+  (:export [main program-for known-country? program-count
+            test-table test-fold test-unknown test-lengths]))
+
+;; --- the programs ---------------------------------------------------------
+;;
+;; Build output. One per country, each compiled from the regex named above it.
+
+;; JP  /\d{3}-\d{4}/
+(defn prog-jp [] :string
+  "K0000009000007100000000000101000001000001010000020000010000002d00000001000003000001010000040000010100000500000101000006000001060000000000000000030000039000030000039000030000039000030000039000030000039000030000039000030000039")
+
+;; US  /\d{5}(-\d{4})?/
+(defn prog-us [] :string
+  "K000000c0000091000000000001010000010000010100000200000101000003000001010000040000010300000600000b0000002d00000001000005000001010000060000010100000700000101000008000001060000000000000000030000039000030000039000030000039000030000039000030000039000030000039000030000039000030000039000030000039")
+
+;; GB  /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/
+(defn prog-gb [] :string
+  "K000000c00000b10000000000010300000200000301000001000001010000020000010300000500000601000003000002030000070000080100000500000301000008000001010000090000010100000a00000106000000000000000004100005a00004100005a00003000003900004100005a00003000003900000900000a00000b00000d00002000002000003000003900004100005a00004100005a")
+
+;; CA  /[A-Z]\d[A-Z]\s?\d[A-Z]\d/
+(defn prog-ca [] :string
+  "K000000900000910000000000010100000100000101000002000001030000040000050100000300000301000006000001010000070000010100000800000106000000000000000004100005a00003000003900004100005a00000900000a00000b00000d00002000002000003000003900004100005a000030000039")
+
+;; DE  /\d{5}/
+(defn prog-de [] :string
+  "K0000006000005100000000000101000001000001010000020000010100000300000101000004000001060000000000000000030000039000030000039000030000039000030000039000030000039")
+
+;; FR  /\d{5}/
+(defn prog-fr [] :string
+  "K0000006000005100000000000101000001000001010000020000010100000300000101000004000001060000000000000000030000039000030000039000030000039000030000039000030000039")
+
+(defn program-for [country :string] :string
+  ;; The `.cljc` upper-cases the country and compares; folding both sides is
+  ;; the same question asked in the direction Kotoba has a head for.
+  (let [c (string-fold-case country)]
+    (if (string=? c (string-fold-case "JP")) (app (ref prog-jp))
+        (if (string=? c (string-fold-case "US")) (app (ref prog-us))
+            (if (string=? c (string-fold-case "GB")) (app (ref prog-gb))
+                (if (string=? c (string-fold-case "CA")) (app (ref prog-ca))
+                    (if (string=? c (string-fold-case "DE")) (app (ref prog-de))
+                        (if (string=? c (string-fold-case "FR")) (app (ref prog-fr))
+                            ""))))))))
+
+(defn known-country? [country :string] :bool
+  (> (string-length (app (ref program-for) country)) 0))
+
+(defn test-table [] :bool
+  ;; every country the .cljc knows a format for has a program here, and each
+  ;; program is a well-formed header
+  (and (string=? "K0" (string-substring (app (ref program-for) "JP") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "US") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "GB") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "CA") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "DE") 0 2))
+       (string=? "K0" (string-substring (app (ref program-for) "FR") 0 2))))
+
+(defn test-fold [] :bool
+  ;; the .cljc upper-cases the country; both cases have to reach the same table
+  (and (string=? (app (ref program-for) "jp") (app (ref program-for) "JP"))
+       (string=? (app (ref program-for) "Us") (app (ref program-for) "US"))))
+
+(defn test-unknown [] :bool
+  (and (not (app (ref known-country?) "ZZ"))
+       (= 0 (string-length (app (ref program-for) "ZZ")))
+       (app (ref known-country?) "JP")))
+
+(defn test-lengths [] :bool
+  ;; DE and FR are the same format, and GB is the longest of the six
+  (and (string=? (app (ref program-for) "DE") (app (ref program-for) "FR"))
+       (> (string-length (app (ref program-for) "GB"))
+          (string-length (app (ref program-for) "DE")))
+       ;; a program is 14 chars of header plus whole instructions and ranges
+       (= 0 (- (string-length (app (ref program-for) "DE"))
+               (+ 14 (+ (* 6 14) (* 5 12)))))))
+
+(defn program-count [] :i64
+  6)
+
+(defn main []
+  (string-length (app (ref program-for) "JP")))
