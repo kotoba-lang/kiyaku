@@ -1,8 +1,130 @@
 (ns postal-core
-  ;; WIP stub, committed before it works: an untracked file in a worktree
-  ;; looks clean to a retirement sweep, and one was removed under this session
-  ;; earlier today with 560 lines in it.
-  (:export [main])
-  (:require [pattern-vm :as vm]))
+  ;; `kiyaku.account`'s postal-format check, in Kotoba -- and the first thing
+  ;; in this workspace to USE `kotoba-lang/pattern` rather than hand-roll a
+  ;; scanner.
+  ;;
+  ;; The `.cljc` spells six country formats as six regex literals and asks
+  ;; `re-matches`. Kotoba has no regex head, which is why twelve modules in
+  ;; this workspace hand-roll scanners out of `string-code-point-at`. Here the
+  ;; pattern is DATA: each program below was compiled from the same regex by
+  ;; `pattern-emit`, and `pattern-vm` runs it.
+  ;;
+  ;; ## Regenerating a program
+  ;;
+  ;; The literals are build output and must not be hand-edited. To regenerate,
+  ;; compile the emitter and ask it:
+  ;;
+  ;;   kotoba -M compile <pattern>/kotoba/pattern_emit.kotoba --target js \
+  ;;     --fuel 200000000 --output emit.mjs
+  ;;   node -e 'import("./emit.mjs").then(m => console.log(
+  ;;     m.instantiateKotoba()["compile-text"]("\\d{3}-\\d{4}")))'
+  ;;
+  ;; ## What is NOT here
+  ;;
+  ;; The unknown-country fallback ("any non-blank postal") stays with the
+  ;; caller: it is not a pattern question, and putting it here would make this
+  ;; module answer for countries it has no format for.
+  (:require [pattern-vm :as vm])
+  (:export [main program-for known-country? valid-postal? valid-postal-text
+            test-jp test-us test-gb test-ca test-de test-unknown test-text]))
 
-(defn main [] 0)
+;; --- the programs ---------------------------------------------------------
+;;
+;; Build output. One per country, each compiled from the regex named above it.
+
+;; JP  /\d{3}-\d{4}/
+(defn prog-jp [] :string
+  "K0000009000007100000000000101000001000001010000020000010000002d00000001000003000001010000040000010100000500000101000006000001060000000000000000030000039000030000039000030000039000030000039000030000039000030000039000030000039")
+
+;; US  /\d{5}(-\d{4})?/
+(defn prog-us [] :string
+  "K000000c0000091000000000001010000010000010100000200000101000003000001010000040000010300000600000b0000002d00000001000005000001010000060000010100000700000101000008000001060000000000000000030000039000030000039000030000039000030000039000030000039000030000039000030000039000030000039000030000039")
+
+;; GB  /[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}/
+(defn prog-gb [] :string
+  "K000000c00000b10000000000010300000200000301000001000001010000020000010300000500000601000003000002030000070000080100000500000301000008000001010000090000010100000a00000106000000000000000004100005a00004100005a00003000003900004100005a00003000003900000900000a00000b00000d00002000002000003000003900004100005a00004100005a")
+
+;; CA  /[A-Z]\d[A-Z]\s?\d[A-Z]\d/
+(defn prog-ca [] :string
+  "K000000900000910000000000010100000100000101000002000001030000040000050100000300000301000006000001010000070000010100000800000106000000000000000004100005a00003000003900004100005a00000900000a00000b00000d00002000002000003000003900004100005a000030000039")
+
+;; DE  /\d{5}/
+(defn prog-de [] :string
+  "K0000006000005100000000000101000001000001010000020000010100000300000101000004000001060000000000000000030000039000030000039000030000039000030000039000030000039")
+
+;; FR  /\d{5}/
+(defn prog-fr [] :string
+  "K0000006000005100000000000101000001000001010000020000010100000300000101000004000001060000000000000000030000039000030000039000030000039000030000039000030000039")
+
+(defn program-for [country :string] :string
+  ;; The `.cljc` upper-cases the country and compares; folding both sides is
+  ;; the same question asked in the direction Kotoba has a head for.
+  (let [c (string-fold-case country)]
+    (if (string=? c (string-fold-case "JP")) (app (ref prog-jp))
+        (if (string=? c (string-fold-case "US")) (app (ref prog-us))
+            (if (string=? c (string-fold-case "GB")) (app (ref prog-gb))
+                (if (string=? c (string-fold-case "CA")) (app (ref prog-ca))
+                    (if (string=? c (string-fold-case "DE")) (app (ref prog-de))
+                        (if (string=? c (string-fold-case "FR")) (app (ref prog-fr))
+                            ""))))))))
+
+(defn known-country? [country :string] :bool
+  (> (string-length (app (ref program-for) country)) 0))
+
+;; Answers the FORMAT question only. A country with no format here is not
+;; "invalid" -- it is not this module's question, and the caller keeps its
+;; non-blank fallback.
+(defn valid-postal? [postal :string country :string] :bool
+  (let [p (app (ref program-for) country)]
+    (if (= 0 (string-length p))
+      false
+      (app (ref vm/match?) p postal))))
+
+(defn valid-postal-text [postal :string country :string] :string
+  (if (app (ref valid-postal?) postal country) "true" "false"))
+
+;; --- tests ----------------------------------------------------------------
+
+(defn test-jp [] :bool
+  (and (app (ref valid-postal?) "123-4567" "JP")
+       (app (ref valid-postal?) "123-4567" "jp")
+       (not (app (ref valid-postal?) "1234567" "JP"))
+       (not (app (ref valid-postal?) "123-456" "JP"))
+       (not (app (ref valid-postal?) "123-45678" "JP"))))
+
+(defn test-us [] :bool
+  (and (app (ref valid-postal?) "12345" "US")
+       (app (ref valid-postal?) "12345-6789" "US")
+       (not (app (ref valid-postal?) "1234" "US"))
+       (not (app (ref valid-postal?) "12345-678" "US"))))
+
+(defn test-gb [] :bool
+  (and (app (ref valid-postal?) "SW1A 2AA" "GB")
+       (app (ref valid-postal?) "SW1A2AA" "GB")
+       (not (app (ref valid-postal?) "sw1a 2aa" "GB"))
+       (not (app (ref valid-postal?) "12345" "GB"))))
+
+(defn test-ca [] :bool
+  (and (app (ref valid-postal?) "K1A0B1" "CA")
+       (app (ref valid-postal?) "K1A 0B1" "CA")
+       (not (app (ref valid-postal?) "K1A  0B1" "CA"))
+       (not (app (ref valid-postal?) "k1a0b1" "CA"))))
+
+(defn test-de [] :bool
+  (and (app (ref valid-postal?) "10115" "DE")
+       (app (ref valid-postal?) "75008" "FR")
+       (not (app (ref valid-postal?) "1011" "DE"))
+       (not (app (ref valid-postal?) "101155" "DE"))))
+
+(defn test-unknown [] :bool
+  ;; a country with no format answers false HERE and the caller falls back
+  (and (not (app (ref known-country?) "ZZ"))
+       (not (app (ref valid-postal?) "12345" "ZZ"))
+       (app (ref known-country?) "JP")))
+
+(defn test-text [] :bool
+  (and (string=? "true" (app (ref valid-postal-text) "123-4567" "JP"))
+       (string=? "false" (app (ref valid-postal-text) "1234567" "JP"))))
+
+(defn main []
+  (string-length (app (ref program-for) "JP")))
