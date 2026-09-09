@@ -73,9 +73,19 @@
                         "--unpinned"
                         "--fuel" (str fuel) "--output" out])]
     (when-not (zero? (:exit c))
-      ;; A refusal here is the require failing, not a disagreement -- say which.
-      (println "compile failed (exit" (:exit c) "):" (:out c) (:err c))
-      (js/process.exit 1))
+      ;; "Could not measure" and "measured a disagreement" must not leave by
+      ;; the same door. A `kotoba` older than kotoba-lang/amu#912 refuses the
+      ;; require itself -- that is a stale toolchain, not a wrong answer, and
+      ;; it exits 2 with the reason named.
+      (let [text (str (:out c) (:err c))]
+        (if (or (.includes text "alias-only :require clauses are admitted")
+                (.includes text "namespace-require-needs-project"))
+          (do (println "REFUSED: this `kotoba` predates kotoba-lang/amu#912 and cannot")
+              (println "         require a module that declares :schemas. Sync the amu")
+              (println "         checkout to the west pin and retry.")
+              (js/process.exit 2))
+          (do (println "compile failed (exit" (:exit c) "):" text)
+              (js/process.exit 1)))))
     (-> (js/import out)
         (.then
          (fn [module]
