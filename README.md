@@ -38,8 +38,8 @@ projects onto `chobo.ledger` in another repository, which is a module boundary
 rather than a language one.
 
 ```bash
-clojure -M:test       # published deps
-clojure -M:local:test # local ../shitsuke ../chobo
+kbb -M:test       # published deps
+kbb -M:local:test # local ../shitsuke ../chobo
 
 # the port, on :jvm-kir :js and :wasm (ABSOLUTE path: a relative one is
 # "input must be a regular file")
@@ -48,7 +48,7 @@ kotoba -M test "$PWD/kotoba/returns_core.kotoba"
 # differential parity: the .cljc that ships against the ESM amu emitted.
 # Both sides RUN -- the oracle is the namespace, not a table of remembered
 # answers, and the port is the artifact, not the source.
-nbb --classpath "src:../chobo/src:../text/src" test/kotoba/returns_parity.cljk
+kbb --backend sci --classpath "src:../chobo/src:../text/src" test/kotoba/returns_parity.cljk
 ```
 
 See `docs/design.md` and `docs/adr/0001-kiyaku-customer-returns.md`.

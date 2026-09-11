@@ -1,4 +1,4 @@
-#!/usr/bin/env nbb
+#!/usr/bin/env kbb
 ;; `kotoba/postal_core.kotoba`'s `valid-postal?`, against the `kiyaku.account`
 ;; that ships.
 ;;
@@ -15,7 +15,7 @@
 ;;
 ;; Exit codes: 0 passed, 1 disagreement, 2 REFUSED.
 ;;
-;;   nbb --classpath "src:<chobo>/src:<text>/src" test/kotoba/postal_parity.cljk
+;;   kbb --backend sci --classpath "src:<chobo>/src:<text>/src" test/kotoba/postal_parity.cljk
 
 (ns kotoba.postal-parity
   (:require ["node:child_process" :as cp]
