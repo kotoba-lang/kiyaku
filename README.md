@@ -48,7 +48,7 @@ kotoba -M test "$PWD/kotoba/returns_core.kotoba"
 # differential parity: the .cljc that ships against the ESM amu emitted.
 # Both sides RUN -- the oracle is the namespace, not a table of remembered
 # answers, and the port is the artifact, not the source.
-nbb --classpath "src:../chobo/src:../text/src" test/kotoba/returns_parity.cljs
+nbb --classpath "src:../chobo/src:../text/src" test/kotoba/returns_parity.cljk
 ```
 
 See `docs/design.md` and `docs/adr/0001-kiyaku-customer-returns.md`.

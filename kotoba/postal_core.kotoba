@@ -39,7 +39,7 @@
   ;; ⚠ `blank?` below recognises ASCII whitespace. `str/blank?` in the
   ;; `.cljc` is `Character/isWhitespace`, which is wider (U+3000 and the rest
   ;; of Unicode Zs). The two agree on every input the parity corpus has, and
-  ;; `test/kotoba/postal_parity.cljs` probes the gap so it fails loudly if a
+  ;; `test/kotoba/postal_parity.cljk` probes the gap so it fails loudly if a
   ;; caller ever depends on the wider one.
   (:require [pattern-vm :as vm])
   (:export [main program-for known-country? program-count valid-postal? blank?
