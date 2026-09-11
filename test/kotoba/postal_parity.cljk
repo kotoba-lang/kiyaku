@@ -15,7 +15,7 @@
 ;;
 ;; Exit codes: 0 passed, 1 disagreement, 2 REFUSED.
 ;;
-;;   nbb --classpath "src:<chobo>/src:<text>/src" test/kotoba/postal_parity.cljs
+;;   nbb --classpath "src:<chobo>/src:<text>/src" test/kotoba/postal_parity.cljk
 
 (ns kotoba.postal-parity
   (:require ["node:child_process" :as cp]
@@ -26,7 +26,7 @@
 
 (def script
   (or (first (filter (fn [a] (.endsWith a ".cljs")) (rest (.slice js/process.argv 0))))
-      "test/kotoba/postal_parity.cljs"))
+      "test/kotoba/postal_parity.cljk"))
 (def repo-root (path/resolve (path/dirname (path/resolve script)) ".." ".."))
 
 (def pattern-repo
